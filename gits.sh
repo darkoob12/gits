@@ -246,6 +246,59 @@ cmd_prune() {
     done
 }
 
+cmd_sync() {
+    local -a branches=("${@}")
+    if [[ ${#branches[@]} -eq 0 ]]; then
+        branches=(master release develop)
+    fi
+
+    find_repos | while read -r repo; do
+        local name
+        name=$(basename "$repo")
+        echo "── ${name} ──"
+
+        local original stashed
+        original=$(get_current_branch "$repo")
+        stashed=false
+
+        if [[ $(is_clean "$repo") == "dirty" ]]; then
+            printf "  stashing changes... "
+            if git -C "$repo" stash push --quiet --include-untracked -m "gits-sync"; then
+                echo "ok"
+                stashed=true
+            else
+                echo "FAILED — skipping repo"
+                echo
+                continue
+            fi
+        fi
+
+        for branch in "${branches[@]}"; do
+            if git -C "$repo" show-ref --verify --quiet "refs/heads/${branch}"; then
+                printf "  %-16s " "${branch}:"
+                git -C "$repo" checkout --quiet "$branch" 2>/dev/null
+                git -C "$repo" pull 2>&1 | tail -1
+            else
+                printf "  %-16s skipped (branch not found)\n" "${branch}:"
+            fi
+        done
+
+        printf "  %-16s " "← ${original}:"
+        git -C "$repo" checkout --quiet "$original" 2>/dev/null && echo "restored"
+
+        if [[ "$stashed" == true ]]; then
+            printf "  unstashing changes... "
+            if git -C "$repo" stash pop --quiet; then
+                echo "ok"
+            else
+                echo "FAILED — run 'git stash pop' manually"
+            fi
+        fi
+
+        echo
+    done
+}
+
 # ── dispatch ──────────────────────────────────────────────────────────────────
 
 usage() {
@@ -259,6 +312,9 @@ Commands:
   fetch               Fetch from origin in every repo
   pull                Pull in every repo
   prune               Prune stale remote-tracking refs in every repo
+  sync [branches...]  For each repo: stash if dirty, pull all given branches
+                      (default: master release develop), then restore the
+                      original branch and unstash
 
 Options:
   -f, --format <a|b|c>  Output format for 'status':
@@ -275,6 +331,7 @@ EOF
 FORMAT="a"
 COMMAND=""
 SWITCH_TARGET=""
+SYNC_BRANCHES=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -286,6 +343,12 @@ while [[ $# -gt 0 ]]; do
             usage; exit 0 ;;
         status|fetch|pull|prune)
             COMMAND="$1"; shift ;;
+        sync)
+            COMMAND="sync"; shift
+            while [[ $# -gt 0 && "$1" != -* ]]; do
+                SYNC_BRANCHES+=("$1"); shift
+            done
+            ;;
         switch)
             COMMAND="switch"
             SWITCH_TARGET="${2:-}"
@@ -310,4 +373,5 @@ case "${COMMAND:-status}" in
     fetch)   cmd_fetch ;;
     pull)    cmd_pull ;;
     prune)   cmd_prune ;;
+    sync)    cmd_sync "${SYNC_BRANCHES[@]}" ;;
 esac
