@@ -246,6 +246,20 @@ cmd_prune() {
     done
 }
 
+cmd_exec() {
+    if [[ $# -eq 0 ]]; then
+        echo "Usage: gits.sh exec <git-command> [args...]" >&2
+        exit 1
+    fi
+
+    find_repos | while read -r repo; do
+        local name
+        name=$(basename "$repo")
+        printf "%-30s " "${name}:"
+        git -C "$repo" "$@" 2>&1
+    done
+}
+
 cmd_sync() {
     local -a branches=("${@}")
     if [[ ${#branches[@]} -eq 0 ]]; then
@@ -312,6 +326,7 @@ Commands:
   fetch               Fetch from origin in every repo
   pull                Pull in every repo
   prune               Prune stale remote-tracking refs in every repo
+  exec <cmd> [args]   Run any git command in every repo (e.g. exec switch master)
   sync [branches...]  For each repo: stash if dirty, pull all given branches
                       (default: master release develop), then restore the
                       original branch and unstash
@@ -332,6 +347,7 @@ FORMAT="a"
 COMMAND=""
 SWITCH_TARGET=""
 SYNC_BRANCHES=()
+EXEC_ARGS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -343,6 +359,10 @@ while [[ $# -gt 0 ]]; do
             usage; exit 0 ;;
         status|fetch|pull|prune)
             COMMAND="$1"; shift ;;
+        exec)
+            COMMAND="exec"; shift
+            EXEC_ARGS=("$@"); set -- ;;
+
         sync)
             COMMAND="sync"; shift
             while [[ $# -gt 0 && "$1" != -* ]]; do
@@ -374,4 +394,5 @@ case "${COMMAND:-status}" in
     pull)    cmd_pull ;;
     prune)   cmd_prune ;;
     sync)    cmd_sync "${SYNC_BRANCHES[@]}" ;;
+    exec)    cmd_exec "${EXEC_ARGS[@]}" ;;
 esac
