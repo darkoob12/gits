@@ -19,6 +19,16 @@ get_tags() {
     git -C "$1" tag --points-at HEAD 2>/dev/null | tr '\n' ' ' | sed 's/ $//'
 }
 
+get_pointing_branches() {
+    local current="$2"
+    git -C "$1" branch --points-at HEAD --format='%(refname:short)' 2>/dev/null \
+        | grep -v "^${current}$" | tr '\n' ' ' | sed 's/ $//'
+}
+
+get_describe() {
+    git -C "$1" describe --tags --always 2>/dev/null
+}
+
 get_other_branches() {
     local current="$2"
     local -a all
@@ -112,15 +122,18 @@ find_repos() {
 fmt_a() {
     local name="$1" branch="$2" tags="$3" others="$4" hash="$5"
     local state="$6" ab="$7" counts="$8" author="$9" rel_time="${10}"
+    local pointing="${11}" describe="${12}"
     local w=28
-    local ab_str=""
-    [[ -n "$ab" ]] && ab_str="  ${ab}"
+    local ab_str="" desc_str=""
+    [[ -n "$ab"       ]] && ab_str="  ${ab}"
+    [[ -n "$describe" ]] && desc_str="  (${describe})"
 
-    printf "%-${w}s  %-20s [%s]%s  %s\n" "${name}:" "$branch" "$hash" "$ab_str" "$state"
+    printf "%-${w}s  %-20s [%s]%s%s  %s\n" "${name}:" "$branch" "$hash" "$ab_str" "$desc_str" "$state"
 
     local line2="${author} · ${rel_time}"
-    [[ -n "$counts" ]] && line2+=" · ${counts}"
-    [[ -n "$tags"   ]] && line2+=" · ${tags}"
+    [[ -n "$counts"   ]] && line2+=" · ${counts}"
+    [[ -n "$tags"     ]] && line2+=" · ${tags}"
+    [[ -n "$pointing" ]] && line2+=" · @(${pointing})"
     line2+=" · (${others:-(no other branches)})"
 
     printf "%-${w}s  %s\n" "" "$line2"
@@ -134,18 +147,21 @@ fmt_a() {
 fmt_b() {
     local name="$1" branch="$2" tags="$3" others="$4" hash="$5"
     local state="$6" ab="$7" counts="$8" author="$9" rel_time="${10}"
+    local pointing="${11}" describe="${12}"
 
-    local short_author short_time ab_str counts_str others_str tags_str
+    local short_author short_time ab_str counts_str others_str tags_str pointing_str desc_str
     short_author="${author:0:12}"
     short_time=$(shorten_time "$rel_time")
     ab_str="${ab:----}"
     counts_str="${counts:-clean}"
     others_str="${others:-(none)}"
     tags_str="${tags:+[${tags}] }"
+    pointing_str="${pointing:+@(${pointing}) }"
+    desc_str="${describe:+(${describe}) }"
 
-    printf "%-22s %-16s %-7s %-10s %-13s %-5s %-12s %s%s\n" \
+    printf "%-22s %-16s %-7s %-10s %-13s %-5s %-12s %s%s%s%s\n" \
         "${name}:" "$branch" "$hash" "$ab_str" "$short_author" \
-        "$short_time" "$counts_str" "$tags_str" "$others_str"
+        "$short_time" "$counts_str" "$tags_str" "$desc_str" "$pointing_str" "$others_str"
 }
 
 # Format C — labeled block per repo
@@ -159,6 +175,7 @@ fmt_b() {
 fmt_c() {
     local name="$1" branch="$2" tags="$3" others="$4" hash="$5"
     local state="$6" ab="$7" counts="$8" author="$9" rel_time="${10}"
+    local pointing="${11}" describe="${12}"
 
     local header="── ${name} "
     local fill_len=$(( 52 - ${#header} ))
@@ -167,11 +184,13 @@ fmt_c() {
     dashes=$(printf '─%.0s' $(seq 1 "$fill_len"))
     echo "${header}${dashes}"
 
-    printf "   branch : %s [%s]   %s   %s\n" "$branch" "$hash" "${ab:-no remote}" "$state"
-    printf "   commit : %s · %s\n" "$author" "$rel_time"
-    [[ -n "$counts" ]] && printf "   changes: %s\n" "$counts"
-    [[ -n "$tags"   ]] && printf "   tags   : %s\n" "$tags"
-    printf "   others : %s\n" "${others:-(none)}"
+    printf "   branch  : %s [%s]   %s   %s\n" "$branch" "$hash" "${ab:-no remote}" "$state"
+    printf "   commit  : %s · %s\n" "$author" "$rel_time"
+    [[ -n "$counts"   ]] && printf "   changes : %s\n" "$counts"
+    [[ -n "$tags"     ]] && printf "   tags    : %s\n" "$tags"
+    [[ -n "$describe" ]] && printf "   describe: %s\n" "$describe"
+    [[ -n "$pointing" ]] && printf "   at head : %s\n" "$pointing"
+    printf "   others  : %s\n" "${others:-(none)}"
     echo
 }
 
@@ -180,7 +199,7 @@ fmt_c() {
 cmd_status() {
     local fmt="${1:-a}"
     find_repos | while read -r repo; do
-        local name branch tags others hash state ab counts author rel_time
+        local name branch tags others hash state ab counts author rel_time pointing describe
         name=$(basename "$repo")
         branch=$(get_current_branch "$repo")
         tags=$(get_tags "$repo")
@@ -191,8 +210,10 @@ cmd_status() {
         counts=$(get_file_counts "$repo")
         author=$(get_last_author "$repo")
         rel_time=$(get_last_time "$repo")
+        pointing=$(get_pointing_branches "$repo" "$branch")
+        describe=$(get_describe "$repo")
 
-        "fmt_${fmt}" "$name" "$branch" "$tags" "$others" "$hash" "$state" "$ab" "$counts" "$author" "$rel_time"
+        "fmt_${fmt}" "$name" "$branch" "$tags" "$others" "$hash" "$state" "$ab" "$counts" "$author" "$rel_time" "$pointing" "$describe"
     done
 }
 
